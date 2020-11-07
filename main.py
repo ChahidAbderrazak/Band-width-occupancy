@@ -76,7 +76,7 @@ def normalize_shuffle(data, norm=0):
         values_normlized=values/data_max
         data_ = DataFrame(values_normlized)
         print(data_)
-        input('flag')
+        # input('flag')
 
     return data_, data_min, data_max
 
@@ -85,7 +85,7 @@ def sliding_windows_series(data0, windows_size=6, label_col = 'y'):
     data.columns = [label_col]
 
     # add the lag of the target variable from 6 steps back up to 24
-    for i in range(1, windows_size):
+    for i in range(1, windows_size+1):
         data['var(t-{})'.format(i)] = data[label_col].shift(i)
 
     # data['time'] = data.index
@@ -120,6 +120,8 @@ def run_ML_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, 
     """
 
     X_train, X_test, X_deploy, y_train, y_test, y_deploy = timeseries_train_test_deploy_split(X, y, deploy_size=deploy_size, test_size=test_size)
+
+    # print('X_train=',X_train)
 
     # we are using random forest here, feel free to swap this out
     # with your favorite regression model
@@ -160,27 +162,29 @@ def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='res
         mae = -1 * cv.mean()
         deviation = cv.std()
 
-        # hard-coded to be 95% confidence interval
-
-        scale = 1.96
-        margin_error = mae + scale * deviation
-        lower = prediction - margin_error
-        upper = prediction + margin_error
-
-        fill_alpha = 0.2
-        fill_color = '#66C2D7'
-        plt.fill_between(x, lower, upper, color=fill_color, alpha=fill_alpha, label='95% Confidence Interval (CI)')
 
 
-        anomalies = np.array([np.nan] * len(ytrue))
-        anomalies = np.array([np.nan] * len(ytrue))
-        anomalies[ytrue < lower] = ytrue[ytrue < lower]
-        anomalies[ytrue > upper] = ytrue[ytrue > upper]
-        plt.plot(anomalies, 'o', markersize=7, label='Anomalies outside the CI')
+    else:
+        mae = 0
+        deviation = 5
 
 
+    scale = 1.96    # hard-coded to be 95% confidence interval
+
+    margin_error = mae + scale * deviation
+    lower = prediction - margin_error
+    upper = prediction + margin_error
+
+    fill_alpha = 0.2
+    fill_color = '#66C2D7'
+    plt.fill_between(x, lower, upper, color=fill_color, alpha=fill_alpha, label='95% Confidence Interval (CI)')
 
 
+    anomalies = np.array([np.nan] * len(ytrue))
+    anomalies = np.array([np.nan] * len(ytrue))
+    anomalies[ytrue < lower] = ytrue[ytrue < lower]
+    anomalies[ytrue > upper] = ytrue[ytrue > upper]
+    plt.plot(anomalies, 'o', markersize=7, label='Anomalies outside the CI')
 
     MAE = mean_absolute_percentage_error(prediction, ytrue)
     plt.title('RF model [memory length='+str(windows_size)+']:  MAE=  '+ '{0:.2f}%'.format(MAE))
@@ -191,34 +195,53 @@ def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='res
     plt.grid(True)
     plt.savefig(filename+'.png', format='png', dpi=1200)
 
-    # plt.show()
+    plt.show()
+
+
+    print('\n # Performance ',filename,' MAE = ', MAE)
+
 
     return MAE
 
 def prediction_sliding_scan(model, data0, windows_size=6, windows_step_size=1):
     data=data0.values
+    # print('data=',data[:windows_size+2])
     y_pred=[]
     y_true=[]
     start=0
-    for i in range(data_.shape[0]-windows_size-2):
-        x=data[start:start+windows_size]
-        x=x.T
-        y_true.append(data[start+windows_size+1])
+    n_frames=data.shape[0]-windows_size
+
+    # print(' n_frames=',n_frames)
+
+    for i in range(n_frames):
+        stop=start+windows_size;
+        x=data[start:stop]
+        x=x.T;
+        yreal=data[stop][0];
+        y_true.append(yreal)
 
         # predict
-        # print('x=',x)
-        y = model.predict(x[::-1])
-        # print( 'y=',y,'\n')
-        y_pred.append(y)
+        xin=np.array([np.flipud(x[0])])
+
+        y = model.predict(xin)
+        y_pred.append(y[0])
+
+        # compare
+        print('xin=',xin);
+        print( 'y=',y,'\n')
+        print( 'y real=',yreal,'\n')
 
         # clide the windows
         start=start+windows_step_size
 
+        # input('flag')
 
     #plot the cv_results
-    y_true=np.asarray(y_true)
-    y_pred=np.asarray(y_pred)
-    plot_prediction(y_true, y_pred)
+
+    y_pred=np.asarray(y_pred); print('y_pred=',y_pred[:4])
+    y_true=np.asarray(y_true); print('y_true=',y_true[:4])
+
+    plot_prediction(y_true, y_pred,filename='scaning')
 
 print('\n###################################################')
 print('\n##      Bandwidth occupancy project 2020         ##')
@@ -226,16 +249,16 @@ print('\n###################################################')
 
 ###############################################################################
 #%% input parameters
-filename='data/rng_1.txt'
+filename='data/rng_0.txt'
 Type_feature='[Band occupancy]'
 test_size=0.5
 deploy_size=0.4
-windows_size=6
+windows_size=10
 windows_step_size=1
 ####################################################################################
-data= load_bin_file(filename)#,max_lines=0.01e6)
+data= load_bin_file(filename,max_lines=1e3)
 # sns.pairplot(data)
-data_, data_min, data_max =normalize_shuffle(data)
+data_, data_min, data_max =normalize_shuffle(data,norm=1)
 print(data_.head())
 
 label_col = 'y'
@@ -245,16 +268,17 @@ print(dataset.head())
 # extract out the features and labels into separate variables
 y = dataset[label_col].values
 data = dataset.drop(label_col, axis=1)
-
-X = dataset.values
+X = data.values
 feature_names = data.columns
 print('X: ', X.shape, '\n', X[:10,:])
 print('y: ', y.T[:10])
 
 model = run_ML_models(X, y,data_min, data_max, deploy_size=deploy_size, test_size=test_size, plot_intervals=True)
 
-# prediction_sliding_scan(model, data_, windows_size=windows_size, windows_step_size=windows_step_size)
-
+## implementation and deployment using sliding frames
+# data_real=data_[:windows_size+50];
+# print('\n Signal to predict using=',data_real,'\n Framesize=', windows_size)
+# prediction_sliding_scan(model, data_real, windows_size=windows_size, windows_step_size=windows_step_size)
 # train_X, test_X, train_y, test_y = timeseries_train_test_split(X, y, test_size=0.4)
 
 print('############   THE END    #############')
