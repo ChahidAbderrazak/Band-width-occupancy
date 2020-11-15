@@ -22,9 +22,22 @@ from sklearn.metrics import mean_squared_error
 from sklearn.utils import shuffle
 
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVR
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score, TimeSeriesSplit
 from lib.Shared_Functions import *
 
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
 
 ####################################################################################
 def load_bin_file(filename, max_lines=-1):
@@ -66,8 +79,8 @@ def normalize_shuffle(data, norm=0):
 
     #%% normalize features
     if norm==1:
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        values_normlized = scaler.fit_transform(values)
+        # scaler = MinMaxScaler(feature_range=(0, 1))
+        # values_normlized = scaler.fit_transform(values)
 
         # naorlaizin [0,1]
         data_min=values.min()
@@ -112,20 +125,118 @@ def timeseries_train_test_deploy_split(X, y, deploy_size=0.4, test_size=0.4):
 def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-def run_ML_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, plot_intervals=False):
-    """
-    - Plots modelled vs original values.
-    - Prediction intervals (95% confidence interval).
-    - Anomalies (points that resides outside the confidence interval).
-    """
+def run_DNN_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, plot_intervals=False):
+    print('\n #################   Run  DL model    ##################')
 
+    X_train, X_test, X_deploy, y_train, y_test, y_deploy = timeseries_train_test_deploy_split(X, y, deploy_size=deploy_size, test_size=test_size)
+
+    # model = RandomForestRegressor(max_depth=6, n_estimators=50)
+    # model.fit(X_train, y_train)
+
+
+
+    # reshape input to be 3D [samples, timesteps, features]
+    X_train = X_train.reshape((X_train.shape[0], 1, X_train.shape[1]))
+    X_test = X_test.reshape((X_test.shape[0], 1, X_test.shape[1]))
+    X_deploy= X_deploy.reshape((X_deploy.shape[0], 1, X_deploy.shape[1]))
+    X=X.reshape((X.shape[0], 1, X.shape[1]))
+    # print('Shapes : [X_train=', X_train.shape,'][y_train=', y_train.shape,'][X_test=', X_test.shape,'][y_test=', y_test.shape)
+
+    #% design network
+    model = Sequential()
+    model.add(LSTM(100, input_shape=(X_train.shape[1], X_train.shape[2])))
+    model.add(Dense(1))
+    model.add(Dense(1))
+    model.compile(loss='mean_squared_error', optimizer='adam')
+    # fit network
+    epochs=100
+    history = model.fit(X_train, y_train, epochs=epochs, batch_size=70, validation_data=(X_test, y_test), verbose=2, shuffle=False)
+
+    #% plot history
+    plt.figure(1)
+    plt.plot(history.history['loss'], label='train')
+    plt.plot(history.history['val_loss'], label='test')
+    plt.legend()
+    plt.show()
+
+    # # make a prediction
+    # prediction = model.predict(X_test)
+    # print('Shapes : [prediction=', prediction.shape)
+    # #
+    # # X_test = X_test.reshape((X_test.shape[0], X_test.shape[2]))
+    # # # invert scaling for forecast
+    # # inv_yhat = concatenate((yhat, X_test[:, 1:values_normlized.shape[1]]), axis=1)
+    # # print('Shapes : [inv_yhat=', inv_yhat.shape)
+    # # inv_yhat = scaler.inverse_transform(inv_yhat)
+    # # inv_yhat = inv_yhat[:,0]
+    # #
+    # # # invert scaling for actual
+    # # y_test = y_test.reshape((len(y_test), 1))
+    # # inv_y = concatenate((y_test, X_test[:, 1:values_normlized.shape[1]]), axis=1)
+    # # inv_y = scaler.inverse_transform(inv_y)
+    # # inv_y = inv_y[:,0]
+    #
+    # #% calculate RMSE
+    # rmse = sqrt(mean_squared_error(y_test, prediction))
+    # Rrmse = 100*sqrt(mean_squared_error(y_test, prediction))/np.max(y_test)
+    #
+    # print('Test RMSE:', rmse , ' and Relative RMSE:', Rrmse,'%')
+    #
+    # #%
+    # prediction = model.predict(X_test)
+    # plt.figure(2)
+    # plt.plot( y_test, label='target')
+    # plt.plot(prediction , label='estimated')
+    # plt.legend()
+    # # plt.title(Type_feature+' Train first '+str(n_train_size) +' samples, RMSE:'+ format(rmse, '.2f') +' and Relative RMSE:'+ format(Rrmse, '.2f') +'%')
+    # plt.show()
+
+    # #Prediction
+    # prediction = model.predict(X_test)
+    # prediction=prediction.reshape((prediction.shape[0],))
+    # # print('Shapes : [y_test=', y_test.shape,'prediction=', prediction.shape,']')
+    # MAE_test=plot_prediction(y_test, prediction,  filename='DL  predict test', clf_name='DNN (epochs='+str(epochs)+')')
+
+    #
+    prediction = model.predict(X_deploy)
+    prediction=prediction.reshape((prediction.shape[0],))
+    MAE_deploy= plot_prediction(y_deploy, prediction,filename='DNN predict_deploy',  clf_name='DNN (epochs='+str(epochs)+')')
+    #
+    # predict all the data
+    prediction = model.predict(X)
+    prediction=prediction.reshape((prediction.shape[0],))
+    MAE_all= plot_prediction(y, prediction,filename='DNN predict_all', clf_name='DNN (epochs='+str(epochs)+')')
+
+    print('\n #################   RESTULTS   ##################')
+    print('\n # MAE depolement = ', MAE_deploy)
+    print('\n # MAE All  = ', MAE_all)
+    print('\n #################################################')
+
+    return model
+
+def run_ML_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, plot_intervals=False):
+    print('\n #################   Run  ML model    ##################')
     X_train, X_test, X_deploy, y_train, y_test, y_deploy = timeseries_train_test_deploy_split(X, y, deploy_size=deploy_size, test_size=test_size)
 
     # print('X_train=',X_train)
 
-    # we are using random forest here, feel free to swap this out
-    # with your favorite regression model
-    model = RandomForestRegressor(max_depth=6, n_estimators=50)
+
+    ## The classifier
+
+    # names = ["Logistic Regression",
+    #          "Nearest Neighbors", "Linear SVM","RBF SVM",
+    #          "Decision Tree", "Random Forest",
+    #          "Neural Net", "AdaBoost","Naive Bayes"]
+    #
+    # model = [LogisticRegression(),#(random_state=0, solver='lbfgs',multi_class='multinomial'),
+    #     KNeighborsClassifier(3), SVC(kernel="linear", C=0.025),SVC(gamma=2, C=1),
+    #     DecisionTreeClassifier(max_depth=5),RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1),
+    #     MLPClassifier(alpha=1),AdaBoostClassifier(),GaussianNB()]
+
+    clf_name,model = "DSVM",SVR(C=1.0, epsilon=0.2)
+
+    # name,model = "DRF", RandomForestRegressor(max_depth=6, n_estimators=50)
+
     model.fit(X_train, y_train)
 
     if plot_intervals:
@@ -134,12 +245,15 @@ def run_ML_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, 
                          cv=timeseries_cv, scoring='neg_mean_absolute_error')
 
     #Prediction
+    prediction = model.predict(X_test)
+    MAE_deploy=plot_prediction(y_test, prediction, plot_intervals, cv, filename='ML predict test',clf_name=clf_name)
+
     prediction = model.predict(X_deploy)
-    MAE_deploy=plot_prediction(y_deploy, prediction, plot_intervals, cv, filename='predict_deploy')
+    MAE_deploy=plot_prediction(y_deploy, prediction, plot_intervals, cv, filename='ML predict_deploy',clf_name=clf_name)
 
     # predict all the data
     prediction = model.predict(X)
-    MAE_all=plot_prediction(y, prediction, plot_intervals, cv, filename='predict_all')
+    MAE_all=plot_prediction(y, prediction, plot_intervals, cv, filename='ML predict_all',clf_name=clf_name)
 
 
     print('\n #################   RESTULTS   ##################')
@@ -149,8 +263,14 @@ def run_ML_models(X, y, data_min=0, data_max=1, deploy_size=0.4, test_size=0.4, 
 
     return model
 
-def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='results'):
 
+def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='results', clf_name=''):
+
+    """
+    - Plots modelled vs original values.
+    - Prediction intervals (95% confidence interval).
+    - Anomalies (points that resides outside the confidence interval).
+    """
 
     plt.figure(figsize=(15, 7))
     x = range(prediction.size)
@@ -166,7 +286,7 @@ def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='res
 
     else:
         mae = 0
-        deviation = 5
+        deviation = 0.01
 
 
     scale = 1.96    # hard-coded to be 95% confidence interval
@@ -187,18 +307,15 @@ def plot_prediction(ytrue, prediction, plot_intervals=False, cv=0, filename='res
     plt.plot(anomalies, 'o', markersize=7, label='Anomalies outside the CI')
 
     MAE = mean_absolute_percentage_error(prediction, ytrue)
-    plt.title('RF model [memory length='+str(windows_size)+']:  MAE=  '+ '{0:.2f}%'.format(MAE))
+    plt.title(clf_name+' Model performance [memory length='+str(windows_size)+']:  MAE=  '+ '{0:.2f}%'.format(MAE))
     plt.legend(loc='best')
     plt.tight_layout()
     plt.xlabel('Time (samples)')
     plt.ylabel('Spectrum (Hz)')
     plt.grid(True)
-    plt.savefig(filename+'.png', format='png', dpi=1200)
-
+    plt.savefig('./results/'+clf_name+'-'+filename+'.png', format='png', dpi=1200)
     plt.show()
-
-
-    print('\n # Performance ',filename,' MAE = ', MAE)
+    print('\n # Performance '+clf_name+'-'+filename,' MAE = ', MAE)
 
 
     return MAE
@@ -259,8 +376,7 @@ windows_step_size=1
 data= load_bin_file(filename,max_lines=1e3)
 # sns.pairplot(data)
 data_, data_min, data_max =normalize_shuffle(data,norm=1)
-print(data_.head())
-
+print('Data=',data_.head())
 label_col = 'y'
 dataset=sliding_windows_series(data_, windows_size=windows_size,label_col = label_col)
 print(dataset.head())
@@ -273,12 +389,14 @@ feature_names = data.columns
 print('X: ', X.shape, '\n', X[:10,:])
 print('y: ', y.T[:10])
 
-model = run_ML_models(X, y,data_min, data_max, deploy_size=deploy_size, test_size=test_size, plot_intervals=True)
+RRF = run_ML_models(X, y,data_min, data_max, deploy_size=deploy_size, test_size=test_size, plot_intervals=True)
+# RNN = run_DNN_models(X, y,data_min, data_max, deploy_size=deploy_size, test_size=test_size, plot_intervals=True)
+
 
 ## implementation and deployment using sliding frames
 # data_real=data_[:windows_size+50];
 # print('\n Signal to predict using=',data_real,'\n Framesize=', windows_size)
 # prediction_sliding_scan(model, data_real, windows_size=windows_size, windows_step_size=windows_step_size)
-# train_X, test_X, train_y, test_y = timeseries_train_test_split(X, y, test_size=0.4)
+# X_train, X_test, y_train, y_test = timeseries_train_test_split(X, y, test_size=0.4)
 
 print('############   THE END    #############')
